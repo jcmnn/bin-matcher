@@ -1,32 +1,92 @@
+from enum import Enum
+import struct
+
+class PatternType(Enum):
+	BYTES = 1
+	ANY = 2
 
 
-class Matcher:
-	def __init__(self, bin):
-		self.bin = bin
-		pass
+class PatternKey(Enum):
+	SKIP_NEXT = 9000
+	SKIP_MATCHES = 9001
 
-	def match(self, patterns):
-		if len(patterns) == 0:
-			return
 
-		def search_next(pattern, bin):
-			if len(pattern) == 0:
-				return
-			pattern_idx = 0
-			pattern_char = pattern[0]
-			for offset, c in enumerate(bin):
-				if pattern_char == c:
-					pattern_idx += 1
-					if pattern_idx == len(pattern):
-						return offset + 1
-					pattern_char = pattern[pattern_idx]
+class Pattern:
+	def __init__(self, *args):
+		self.patterns = []
+		self.debug = False
+		self.skip_matches = 0
+
+		skip_next = False
+		skip_matches_next = False
+
+		for arg in args:
+			if arg == PatternKey.SKIP_NEXT:
+				skip_next = True
+				continue
+			if arg == PatternKey.SKIP_MATCHES:
+				skip_matches_next = True
+				continue
+			elif arg == False:
+				self.debug = True
+			elif isinstance(arg, int):
+				if skip_matches_next:
+					self.skip_matches = arg
 				else:
-					pattern_idx = 0
+					self.patterns.append((PatternType.ANY, arg, not skip_next))
+			elif isinstance(arg, bytes):
+				self.patterns.append((PatternType.BYTES, arg, not skip_next))
+			else:
+				raise TypeError("Expected 'bytes' or 'int'")
+			skip_next = False
+			skip_matches_next = False
 
-		curr_bin = self.bin
 
-		for pattern in patterns:
-			offset = search_next(pattern, curr_bin)
-			if offset == None:
-				print("Failed to find pattern")
-				return
+	def search(self, bin):
+		data = bytearray()
+		iter = enumerate(bin)
+		matches_to_do = self.skip_matches
+		for (offset, x) in iter:
+			start_offset = offset
+			data = bytearray()
+			failed = False
+			successes = 0
+			for (ptype, arg, arg2) in self.patterns:
+				if ptype == PatternType.BYTES:
+					if arg != bin[offset:offset + len(arg)]:
+						if successes >= 1 and self.debug:
+							print(bin[offset:offset + len(arg)])
+						failed = True
+						break
+					else:
+						if self.debug:
+							print(hex(offset))
+						[next(iter) for x in range(len(arg) - 1)]
+						
+				elif ptype == PatternType.ANY:
+					if (arg > len(bin) - offset):
+						failed = True
+						break
+					if arg2:
+						data.append(x)
+					if self.debug:
+						print(arg)
+					for n in range(arg - 1):
+						if arg2:
+							data.append(next(iter)[1])
+						else:
+							next(iter)
+				try:
+					offset, x = next(iter)
+				except StopIteration:
+					pass
+				successes = successes + 1
+
+			if not failed:
+				if matches_to_do == 0:
+					return (start_offset, data)
+				else:
+					matches_to_do = matches_to_do - 1
+		return None
+
+
